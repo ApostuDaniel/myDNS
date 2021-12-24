@@ -15,153 +15,231 @@
 #include "dns.h"
 
 int port;
-char* address;
-char* database;
+char *address;
+char *database;
+char *ORIGIN;
 
 /* codul de eroare returnat de anumite apeluri */
 extern int errno;
 
-int main(int argc, char** argv)
+int main(int argc, char **argv)
 {
-  struct sockaddr_in server;	// structura folosita de server
-  struct sockaddr_in client;    //structura in care stocam adresa clientului
-  struct sockaddr_in subdomain_server;  //structura pe care o folosim pentru a interoga un subdomeniu
-  int sd;			//descriptorul de socket 
+  struct sockaddr_in server; // structura folosita de server
+  struct sockaddr_in sender; //structura in care stocam adresa clientului sau a altui server
+  int sd;                    //descriptorul de socket
 
   /* crearea unui socket */
-  if ((sd = socket (AF_INET, SOCK_DGRAM, 0)) == -1)
-    {
-      perror ("[server]Eroare la socket().\n");
-      return errno;
-    }
-
-  /* pregatirea structurilor de date */
-  bzero (&server, sizeof (server));
-  bzero (&client, sizeof (client));
-  bzero (&subdomain_server, sizeof (subdomain_server));
-
-  if(argc < 2){
-      printf ("[server]Syntax: %s <config_file>.\n", argv[0]);
-      return errno;
+  if ((sd = socket(AF_INET, SOCK_DGRAM, 0)) == -1)
+  {
+    perror("[server]Eroare la socket().\n");
+    return errno;
   }
 
-  if(configureServer(&address, &port, &database, argv[1]) == false){
-        perror("Error when proccesing config file, program ends");
-        return errno;
-    }
-  
+  /* pregatirea structurilor de date */
+  bzero(&server, sizeof(server));
+  bzero(&sender, sizeof(sender));
+
+  if (argc < 2)
+  {
+    printf("[server]Syntax: %s <config_file>.\n", argv[0]);
+    return errno;
+  }
+
+  if (configureServer(&address, &port, &database, &ORIGIN, argv[1]) == false)
+  {
+    perror("Error when proccesing config file, program ends");
+    return errno;
+  }
+
   /* umplem structura folosita de server */
   /* stabilirea familiei de socket-uri */
-    server.sin_family = AF_INET;	
+  server.sin_family = AF_INET;
   /* acceptam orice adresa */
-    server.sin_addr.s_addr = inet_addr(address);
+  server.sin_addr.s_addr = inet_addr(address);
   /* utilizam un port utilizator */
-    server.sin_port = htons (port);
-  
+  server.sin_port = htons(port);
+
   /* atasam socketul */
-  if (bind (sd, (struct sockaddr *) &server, sizeof (struct sockaddr)) == -1)
+  if (bind(sd, (struct sockaddr *)&server, sizeof(struct sockaddr)) == -1)
+  {
+    perror("[server]Eroare la bind().\n");
+    free(address);
+    free(database);
+    return errno;
+  }
+
+  /* servim concurrent */
+  while (1)
+  {
+    int msglen;
+    int length = sizeof(sender);
+
+    printf("[server]Astept la portul %d...\n", port);
+    fflush(stdout);
+
+    dnsresponse receivedQuery;
+    bzero(&receivedQuery, sizeof(dnsquery));
+
+    /* citirea mesajului primit de la client, sau de la un alt server */
+    if ((msglen = recvfrom(sd, &receivedQuery, sizeof(dnsquery), 0, (struct sockaddr *)&sender, &length)) <= 0)
     {
-      perror ("[server]Eroare la bind().\n");
+      perror("[server]Eroare la recvfrom() de la client.\n");
+      free(address);
+      free(database);
       return errno;
     }
 
-  
-  /* servim concurrent */
-  while (1)
+    printf("[server]Mesajul a fost receptionat...\n");
+
+    switch ((fork()))
     {
-      int msglen;
-      int length = sizeof (client);
+    case -1:
+      perror("Eroare la fork");
+      break;
+    case 0:
+      ;
+      sqlite3 *db; //our data base
+      sqlite3_stmt *stmt;
+      char sqlCommand[1012] = {0};
+      char *FQDN = fullyQualifiedDomainName(receivedQuery.query.qName);
+      sprintf(sqlCommand, "SELECT * FROM RR WHERE Type='%s' AND Name = '%s'", "NS", FQDN);
+      free(FQDN);
+      printf("Executing statement: %s", sqlCommand);
 
-      printf ("[server]Astept la portul %d...\n",port);
-      fflush (stdout);
+      int dbStatus = sqlite3_open(database, &db);
 
-      dnsquery receivedQuery;
-      bzero(&receivedQuery, sizeof(dnsquery));
-      
-      /* citirea mesajului primit de la client */
-      if ((msglen = recvfrom(sd, &receivedQuery, sizeof(dnsquery), 0,(struct sockaddr*) &client, &length)) <= 0)
-      
-	{
-	  perror ("[server]Eroare la recvfrom() de la client.\n");
-	  return errno;
-	}
+      if (dbStatus != SQLITE_OK)
+      {
+        fprintf(stderr, "Cannot open server database: %s", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return 1;
+      }
 
-      printf ("[server]Mesajul a fost receptionat...\n");
+      dbStatus = sqlite3_prepare_v2(db, sqlCommand, -1, &stmt, 0);
+      if(dbStatus != SQLITE_OK){
+        fprintf(stderr, "Failed to execute binding statement: %s\n", sqlite3_errmsg(db));
+        sqlite3_close(db);
+        return 1;
+      }
+      // if (dbStatus == SQLITE_OK)
+      // {
+      //   int index = sqlite3_bind_parameter_index(stmt, "@name");
+      //   char *FQDN = fullyQualifiedDomainName(receivedQuery.qName);
+      //   printf("Searching for: %s\n", FQDN);
+      //   sqlite3_bind_text(stmt, index, FQDN, -1, free);
+      // }
+      // else
+      // {
+      //   fprintf(stderr, "Failed to execute binding statement: %s\n", sqlite3_errmsg(db));
+      //   sqlite3_close(db);
+      //   return 1;
+      // }
 
-        switch ((fork())) {
-            case -1:
-                perror("Eroare la fork");
-                break;
-            case 0:
-                /*pregatim mesajul de raspuns */
-                // bzero(msgrasp, 500);
-                // strcat(msgrasp, receivedQuery.qName );
-                // strcat(msgrasp, " - primit de la ");
-                // strcat(msgrasp, inet_ntoa(client.sin_addr));
-                // strcat(msgrasp, " port ");
-                // char text[20];
-                // sprintf(text, "%d", client.sin_port);
-                // strcat(msgrasp, text);
-                ;
-                dnsresponse queryResponse;
-                bzero(&queryResponse, sizeof(queryResponse));
-                queryAssign(&queryResponse.query, &receivedQuery);
-                queryResponse.Class = DNS_QCLASS_IN;
-                strncpy(queryResponse.name, queryResponse.query.qName, strlen(queryResponse.query.qName));
-                queryResponse.TTL = 50;
-                strcpy(queryResponse.Data, "8.8.8.8 A google.com");
+      dnsresponse queryResponse;
+      bzero(&queryResponse, sizeof(queryResponse));
+      queryAssign(&queryResponse.query, &receivedQuery.query);
 
-                printf("[server]Trimitem mesajul inapoi...\n");
+      int step = sqlite3_step(stmt);
 
-                /* returnam mesajul clientului */
-                if (sendto(sd, &queryResponse, sizeof(dnsresponse), 0, (struct sockaddr*) &client, length) <= 0)
-                {
-                    perror ("[server]Eroare la sendto() catre client.\n");
-                    continue;		/* continuam sa ascultam */
-                }
-                else
-                    printf ("[server]Mesajul a fost trasmis cu succes.\n");
-                return 0;
-            default:
-                while(waitpid(-1, NULL, WNOHANG));
-                continue;
-        }
-    }				/* while */
-}				/* main */
+      if (step == SQLITE_ROW)
+      {
+        printf("Writing a response.\n");
+        strcpy(queryResponse.name, sqlite3_column_text(stmt, 0));
+        queryResponse.TTL = atoi(sqlite3_column_text(stmt, 1));
+        queryResponse.Class = strcmp(sqlite3_column_text(stmt, 2), "IN") == 0 ? DNS_QCLASS_IN : DNS_QCLASS_NONE;
+        queryResponse.Type = strcmp(sqlite3_column_text(stmt, 3), "NS") == 0 ? DNS_QTYPE_NS : DNS_QTYPE_NAPTR;
+        queryResponse.DataLength = atoi(sqlite3_column_text(stmt, 5));
+        strncpy(queryResponse.Data, sqlite3_column_text(stmt, 4), queryResponse.DataLength);
+      }
 
-bool configureServer(char** address, int* port, char** database, char* configFile){
-    FILE* fp;
-    char buff[256] = {0};
-    *address = NULL;
-    *port = 0;
-    fp = fopen(configFile, "r");
+      sqlite3_finalize(stmt);
+      sqlite3_close(db);
+      printf("[server]Trimitem mesajul inapoi...\n");
 
-    if(fp == NULL){
-        perror("Cannot open config file, program ends");
-        return false;
+      /* returnam mesajul clientului */
+      if (sendto(sd, &queryResponse, sizeof(dnsresponse), 0, (struct sockaddr *)&sender, length) <= 0)
+      {
+        perror("[server]Eroare la sendto() catre client.\n");
+        continue; /* continuam sa ascultam */
+      }
+      else
+        printf("[server]Mesajul a fost trasmis cu succes.\n");
+      return 0;
+    default:
+      while (waitpid(-1, NULL, WNOHANG))
+        ;
+      continue;
+    }
+  } /* while */
+} /* main */
+
+bool configureServer(char **address, int *port, char **database, char** origin, char *configFile)
+{
+  FILE *fp;
+  char buff[256] = {0};
+  *address = NULL;
+  *port = 0;
+  fp = fopen(configFile, "r");
+
+  if (fp == NULL)
+  {
+    perror("Cannot open config file, program ends");
+    return false;
+  }
+
+  while (fgets(buff, 255, fp) != NULL)
+  {
+    if (buff[strlen(buff) - 1] == '\n')
+      buff[strlen(buff) - 1] = 0;
+
+    if (strncmp(buff, ADDR_FLD, strlen(ADDR_FLD)) == 0)
+    {
+      *address = strdup(buff + strlen(ADDR_FLD) + 1);
+    }
+    else if (strncmp(buff, PORT_FLD, strlen(PORT_FLD)) == 0)
+    {
+      *port = atoi(buff + strlen(PORT_FLD) + 1);
+    }
+    else if (strncmp(buff, DATABASE_FLD, strlen(DATABASE_FLD)) == 0)
+    {
+      *database = strdup(buff + strlen(DATABASE_FLD) + 1);
+    }
+    else if (strncmp(buff, ORIGIN_FLD, strlen(ORIGIN_FLD)) == 0)
+    {
+      *origin = strdup(buff + strlen(ORIGIN_FLD) + 1);
     }
 
-    char* addr_fld = "Address";
-    char* port_fld = "Port";
-    char* database_fld = "DB";
+  }
+  fclose(fp);
 
-    while (fgets(buff, 255, fp) != NULL)
+  if (*address == NULL || *port == 0 || *database == NULL || *origin == NULL)
+  {
+    free(*address);
+    free(*database);
+    free(*origin);
+    return false;
+  }
+
+  return true;
+}
+
+char *fullyQualifiedDomainName(char *queryDomain)
+{
+  int len = strlen(queryDomain);
+  char *FQDN = (char *)malloc(len);
+  int start = 0;
+  int count;
+  int currentPos = 0;
+  while (start < len)
+  {
+    count = queryDomain[start];
+    for (size_t i = start + 1; i < start + 1 + count; i++)
     {
-        if(buff[strlen(buff) - 1] == '\n') buff[strlen(buff) - 1] = 0;
-
-        if(strncmp(buff, addr_fld, strlen(addr_fld)) == 0){
-            *address = strdup(buff + strlen(addr_fld) + 1);
-        }
-        else if(strncmp(buff, port_fld, strlen(port_fld)) == 0){
-            *port = atoi(buff + strlen(port_fld) + 1);
-        }
-        else if(strncmp(buff, database_fld, strlen(database_fld)) == 0){
-            *database = strdup(buff + strlen(database_fld) + 1);
-        }
+      FQDN[currentPos++] = queryDomain[i];
     }
-    fclose(fp);
-
-    if(*address == NULL || *port == 0) return false;
-
-    return true;
+    FQDN[currentPos++] = '.';
+    start = start + 1 + count;
+  }
+  FQDN[currentPos] = 0;
+  return FQDN;
 }
