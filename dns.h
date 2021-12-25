@@ -15,6 +15,10 @@
     You should have received a copy of the GNU General Public License
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
+#ifndef DNS_H
+#define DNS_H
+
+
 
 #define DNS_OPCODE_QUERY	0
 #define DNS_OPCODE_IQUERY	1
@@ -58,14 +62,14 @@ typedef struct {
 	uint16_t zero:3;
 	uint16_t rcode:4;
 # elif __BYTE_ORDER == __LITTLE_ENDIAN
-	uint16_t rd:1;
-	uint16_t tc:1;
-	uint16_t aa:1;
-	uint16_t opcode:4;
-	uint16_t qr:1;
-	uint16_t rcode:4;
-	uint16_t zero:3;
-	uint16_t ra:1;
+	uint16_t rd:1;  /*Recursion desired bit*/
+	uint16_t tc:1;  /*Response Truncated bit*/
+	uint16_t aa:1;  /*Authorative Answer bit*/
+	uint16_t opcode:4;  /*Operation code, values above*/
+	uint16_t qr:1;  /*unset if message is a query, set if it is a response*/
+	uint16_t rcode:4;  /*Response code, values above*/
+	uint16_t zero:3;  /*rezerved for future use*/
+	uint16_t ra:1;  /*Recursion available*/
 # else
 #  error "Adjust your <bits/endian.h> defines"
 # endif
@@ -166,3 +170,4 @@ void responseAssign(dnsresponse* dest, dnsresponse* src){
     dest->TTL = src->TTL;
     strncpy(dest->Data, src->Data, src->DataLength);
 }
+#endif // !DNS_H
