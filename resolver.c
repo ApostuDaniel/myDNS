@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <string.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
@@ -8,8 +9,8 @@
 #include <errno.h>
 #include <unistd.h>
 #include <time.h>
-#include "resolverUtils.h"
 #include "dns.h"
+#include "resolverUtils.h"
 
 int port;
 char* address;
@@ -79,8 +80,7 @@ int main(int argc, char* argv[]){
             return errno;
             }
 
-            fprintf(fp, "Query Id: %d   Response: %s\n",response.query.Header.id, response.Data);
-            printf("Wrote to output\n");
+            outputResponse(&response, stdout);
         }
 
         if(fp != stdout) fclose(fp);
@@ -112,7 +112,7 @@ int main(int argc, char* argv[]){
                 return errno;
                 }
 
-                printf("Query Id: %d   Response: %s\n",response.query.Header.id, response.Data);
+                outputResponse(&response, stdout);
             }
         }
     }
@@ -120,6 +120,17 @@ int main(int argc, char* argv[]){
     close(sd);
     free(address);
     return 0;
+}
+
+void outputResponse(dnsresponse* response, FILE* fp){
+    fprintf(fp, "Query Id: %d , Domain: %s\n", response->query.Header.id, response->name);
+    if(response->query.Header.rcode == DNS_RCODE_NOERROR){
+        fprintf(fp, "Type: %d Class: %d\t%s\n", response->Type, response->Class, response->Data);
+    }
+    else if(response->query.Header.rcode == DNS_RCODE_NXDOMAIN){
+        fprintf(fp ,"Domain inexistent\n");
+    }
+    printf("Output Finished\n");
 }
 
 bool configureResolver(char** address, int* port, char* configFile){
@@ -160,7 +171,7 @@ bool processInput(char* domainName)
 {
     //Check that the domainName length fits our criteria
     int len = strlen(domainName);
-    if(len > 255){printf("Domain to long\n"); return false;}
+    if(len > 255){printf("error:Domain to long\n"); return false;}
     
     const char permitedChars[] = "abcdefghijklmnopqrstuvwxyz1234567890.-";
     
@@ -170,7 +181,7 @@ bool processInput(char* domainName)
             domainName[i] = domainName[i] + 32;
         }
         //check that we only have valid charchters in the domain
-        if(strchr(permitedChars, domainName[i]) == NULL) {printf("Invalid charachter %c in domain at index %d\n", domainName[i], i); return false;}
+        if(strchr(permitedChars, domainName[i]) == NULL) {printf("error:Invalid charachter %c in domain at index %d\n", domainName[i], i); return false;}
     }
     if(domainName[len - 1] == '.') domainName[len - 1] = 0;
     
@@ -179,7 +190,6 @@ bool processInput(char* domainName)
     char copy[255] = {0};
     
     strncpy(copy, domainName, strlen(domainName));
-    printf("%s\n", copy);
     
     //split the domain into labels
     char *ptr = strtok(copy, delim);
@@ -187,8 +197,8 @@ bool processInput(char* domainName)
     //check that each label has less than 63 charchters, and that they don't start or end with '-'
     while(ptr != NULL)
     {
-        if(ptr[0] == '-' || ptr[strlen(ptr)-1] == '-') {printf("charchter - at begining or end of label\n");return false;}
-        if(strlen(ptr) > 63) {printf("label longer than 63 charachters\n");return false;}
+        if(ptr[0] == '-' || ptr[strlen(ptr)-1] == '-') {printf("error:charchter - at begining or end of label\n");return false;}
+        if(strlen(ptr) > 63) {printf("error:label longer than 63 charachters\n");return false;}
         ptr = strtok(NULL, delim);
     }
     
@@ -236,7 +246,7 @@ dnsquery createQuery(char* domainName){
     query.QClass = DNS_QCLASS_IN;
     query.QType = DNS_QTYPE_A;
     query.Header.qr = 0;
-    query.Header.id = random() % 65536;
+    query.Header.id = random() % 65535;
     query.Header.opcode = 0;
     query.Header.aa = 0;
     query.Header.adcount = 0;
