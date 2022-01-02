@@ -1,0 +1,5 @@
+Address:127.0.0.1
+Port:2708
+DB:data/marketplace_facebook_comDB.db
+ORIGIN:marketplace.facebook.com.
+SQL:sqlscripts/marketplace_facebook_com.sql

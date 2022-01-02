@@ -1,0 +1,5 @@
+Address:127.0.0.1
+Port:2706
+DB:data/nature_leafDB.db
+ORIGIN:nature.leaf.
+SQL:sqlscripts/nature_leaf.sql

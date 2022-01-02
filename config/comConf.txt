@@ -1,0 +1,5 @@
+Address:127.0.0.1
+Port:2701
+DB:data/comDB.db
+ORIGIN:com.
+SQL:sqlscripts/com.sql

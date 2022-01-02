@@ -1,0 +1,5 @@
+Address:127.0.0.1
+Port:2707
+DB:data/test_anyDB.db
+ORIGIN:test.any.
+SQL:sqlscripts/test_any.sql

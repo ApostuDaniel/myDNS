@@ -1,0 +1,5 @@
+Address:127.0.0.1
+Port:2703
+DB:data/anyDB.db
+ORIGIN:any.
+SQL:sqlscripts/any.sql

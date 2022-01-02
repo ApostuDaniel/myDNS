@@ -1,0 +1,5 @@
+Address:127.0.0.1
+Port:2705
+DB:data/facebook_comDB.db
+ORIGIN:facebook.com.
+SQL:sqlscripts/facebook_com.sql
