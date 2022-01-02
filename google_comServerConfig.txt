@@ -1,4 +1,0 @@
-Address:127.0.0.1
-Port:2703
-DB:google_comDB.db
-ORIGIN:google.com.
